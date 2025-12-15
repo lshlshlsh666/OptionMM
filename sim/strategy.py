@@ -39,6 +39,7 @@ class SimpleImproveInsideStrategy(BaseStrategy):
     Minimal baseline strategy:
     - Universe: N strikes around ATM, for selected option_types
     - Quotes: improve inside the market spread by a fixed fraction
+    - Position limits: stop quoting one side when at limit
 
     Notes:
     - This class is intentionally simple and meant as a template for more complex strategies.
@@ -49,6 +50,10 @@ class SimpleImproveInsideStrategy(BaseStrategy):
     option_types: tuple[str, ...] = ("C", "P")
     improvement_frac: float = 0.25  # 0 => join market; 0.5 => midpoint
     min_half_spread: float = 0.01  # absolute minimum half-spread in price units
+
+    # Position limits
+    max_position_per_contract: int = 10  # Max |qty| per (strike, option_type)
+    max_total_position: int = 50  # Max |sum of all positions|
 
     def select_universe(self, market_at_ts: pd.DataFrame) -> pd.Index:
         if market_at_ts.empty:
@@ -111,8 +116,15 @@ class SimpleImproveInsideStrategy(BaseStrategy):
         positions: dict[tuple[float, str], int],
         predicted_at_ts: pd.DataFrame,
     ) -> pd.DataFrame:
-        # This baseline strategy currently ignores positions and predicted prices,
-        # but the signature supports more complex strategies.
+        """
+        Generate quotes with position limit enforcement.
+
+        Position limits:
+        - If long position >= max_position_per_contract, don't quote bid (no more buying)
+        - If short position >= max_position_per_contract, don't quote ask (no more selling)
+        - If total position magnitude >= max_total_position, don't quote in the direction
+          that would increase exposure
+        """
         if universe.empty:
             return pd.DataFrame(columns=["my_bid", "my_ask"])
 
@@ -126,6 +138,31 @@ class SimpleImproveInsideStrategy(BaseStrategy):
         half = np.maximum((my_ask - my_bid) / 2, self.min_half_spread)
         my_bid = (mid - half).clip(lower=0.0)
         my_ask = (mid + half).clip(lower=0.0)
+
+        # Apply position limits
+        total_position = sum(positions.values()) if positions else 0
+
+        for idx in universe:
+            strike = float(idx[0])
+            option_type = str(idx[1])
+            key = (strike, option_type)
+            pos = positions.get(key, 0)
+
+            # Per-contract limit
+            if pos >= self.max_position_per_contract:
+                # At max long, don't quote bid (no more buying)
+                my_bid.loc[idx] = 0.0
+            if pos <= -self.max_position_per_contract:
+                # At max short, don't quote ask (no more selling)
+                my_ask.loc[idx] = 0.0
+
+            # Total position limit
+            if total_position >= self.max_total_position:
+                # At max total long, don't buy more
+                my_bid.loc[idx] = 0.0
+            if total_position <= -self.max_total_position:
+                # At max total short, don't sell more
+                my_ask.loc[idx] = 0.0
 
         out = pd.DataFrame({"my_bid": my_bid, "my_ask": my_ask})
         out.index = mkt.index
