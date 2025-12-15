@@ -156,11 +156,101 @@ snapshot_with_predictions = predict_all_next_prices(
 
 ## Trading Strategies
 
-TODO...
+This repo currently includes a minimal market-making backtester under `sim/`:
+
+- Generate our quotes per timestamp (default: improve inside the market spread by a fixed fraction)
+- Simulate fills:
+  - Cross -> immediate fill
+  - Otherwise -> probabilistic hit based on aggressiveness vs market quotes
+- Log quotes/trades/timeline and compute headline metrics
 
 ## Risk Management
 
 TODO...
+
+## Backtesting (Market Making)
+
+Run the minimal backtest demo:
+
+```python
+from scripts.run_backtest import main
+
+main()
+```
+
+## Strategy Interface (Handover)
+
+Strategies live under `sim/strategy.py` and must implement `BaseStrategy`.
+
+### Required methods
+
+- **`select_universe(market_at_ts) -> pd.Index`**
+
+  - **Input**: `market_at_ts` is the market snapshot at one timestamp (a cross-section).
+    - **Index**: `("strike", "option_type")`
+    - **Required columns**: `bid`, `ask`
+    - **Optional columns**: `is_atm`, `underlying_bid`, `underlying_ask`, `iv`, `r`, `predicted_price`, ...
+  - **Output**: an index subset of contracts to quote (same index type as above).
+
+- **`generate_quotes(market_at_ts, universe, positions, predicted_at_ts) -> pd.DataFrame`**
+  - **Inputs**:
+    - `market_at_ts`: same as above.
+    - `universe`: the selected contract index (subset of `market_at_ts.index`).
+    - `positions`: `dict[(strike, option_type) -> qty]` representing current inventory.
+      - `qty > 0` long; `qty < 0` short.
+    - `predicted_at_ts`: DataFrame aligned to `("strike","option_type")`.
+      - If available, contains column `predicted_price`.
+      - If not available, it will be an empty DataFrame but with the same index.
+  - **Output**: a DataFrame with:
+    - **Index**: `("strike", "option_type")` (typically exactly `universe`)
+    - **Required columns**: `my_bid`, `my_ask`
+    - **Constraints**: `my_bid > 0`, `my_ask > 0`, `my_ask >= my_bid` (otherwise fills are skipped).
+
+### How the simulator uses your quotes (important)
+
+The fill model is implemented in `sim/trade_simulator.py`:
+
+- **Crossing**:
+  - If `my_bid >= market_ask` -> immediate buy fill at `market_ask`
+  - If `my_ask <= market_bid` -> immediate sell fill at `market_bid`
+- **Otherwise probabilistic**:
+  - If you are **more aggressive** (inside-spread), fill probability increases with aggressiveness.
+  - If you are **not more aggressive** (join/worse), fill probability is penalized by queue size ahead if
+    `bid_size/ask_size` exists in the data (negative correlation).
+  - If hit, fills are **always 1 contract** (configurable via `FillModelConfig.trade_size`).
+
+### Minimal template
+
+```python
+import pandas as pd
+from sim.strategy import BaseStrategy
+
+
+class MyStrategy(BaseStrategy):
+    def select_universe(self, market_at_ts: pd.DataFrame) -> pd.Index:
+        return market_at_ts.index  # or select ATM band
+
+    def generate_quotes(
+        self,
+        market_at_ts: pd.DataFrame,
+        universe: pd.Index,
+        positions: dict[tuple[float, str], int],
+        predicted_at_ts: pd.DataFrame,
+    ) -> pd.DataFrame:
+        mkt = market_at_ts.loc[universe, ["bid", "ask"]]
+        mid = (mkt["bid"] + mkt["ask"]) / 2
+
+        if "predicted_price" in predicted_at_ts.columns:
+            theo = predicted_at_ts.loc[universe, "predicted_price"].fillna(mid)
+        else:
+            theo = mid
+
+        half = 0.01
+        return pd.DataFrame(
+            {"my_bid": (theo - half).clip(lower=0.0), "my_ask": (theo + half).clip(lower=0.0)},
+            index=universe,
+        )
+```
 
 ## Technical Details
 

@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["core", "utils"]
+packages = ["core", "utils", "sim"]
 
 [dependency-groups]
 dev = [
