@@ -1,0 +1,57 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "final"
+version = "0.1.0"
+description = "Final Project for MTH 9871"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "jupyter>=1.1.1",
+    "matplotlib>=3.10.8",
+    "numpy>=2.3.5",
+    "pandas>=2.3.3",
+    "pyarrow>=22.0.0",
+    "scipy>=1.16.3",
+    "tqdm>=4.67.1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["core", "utils"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14.9",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+exclude = [
+    ".git",
+    "__pycache__",
+    ".venv",
+    "venv",
+    ".env",
+    "build",
+    "dist",
+    "*.egg-info",
+]
+
+[tool.ruff.lint]
+# pycodestyle(E/W), pyflakes(F), isort(I), pyupgrade(UP), bugbear(B),
+# comprehensions(C4), simplify(SIM), modernize/cleanup(PIE), Ruff (RUF)
+select = ["E", "W", "F", "I", "UP", "B", "C4", "SIM", "PIE", "RUF"]
+ignore = ["E203"]
+fixable = ["ALL"]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+
+[tool.ruff.format]
+indent-style = "space"
+line-ending = "lf"
+quote-style = "preserve"
+# Note: line-length is inherited from [tool.ruff]
