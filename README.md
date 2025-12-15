@@ -20,13 +20,22 @@ This project implements a complete option pricing and prediction system, includi
 │   └── option_price_predictor.py # Option price prediction
 ├── utils/                         # Utility modules
 │   ├── dataloader.py             # Data loading and preprocessing
-│   └── pricing.py                # Option pricing models (BS, Binomial Tree)
+│   ├── pricing.py                # Option pricing models (BS, Binomial Tree)
+│   └── greeks.py                 # Greeks calculation (delta, gamma)
+├── sim/                           # Simulation and backtesting
+│   ├── backtester.py             # Sequential backtester with hedging
+│   ├── strategy.py               # Strategy interface and implementations
+│   ├── trade_simulator.py        # Fill model simulation
+│   ├── hedger.py                 # Delta hedging module
+│   └── metrics.py                # Performance metrics
 ├── scripts/                       # Script files
 │   ├── preprocess_data.py        # Data preprocessing script
-│   └── predict_iv.py             # Prediction script
+│   ├── predict_iv.py             # Prediction script
+│   ├── run_backtest.py           # Run market-making backtest
+│   └── analyze_vol_fit.py        # Vol-fit analysis
 ├── data/                          # Data directory
-│   ├── raw/                      # Raw data
-│   └── processed/                # Processed data
+│   ├── raw/                      # Raw OPRA snapshots
+│   └── processed/                # Processed data and results
 ├── config.py                      # Configuration file
 ```
 
@@ -166,7 +175,32 @@ This repo currently includes a minimal market-making backtester under `sim/`:
 
 ## Risk Management
 
-TODO...
+### Delta Hedging
+
+The system implements **threshold-based delta hedging** to manage directional risk:
+
+- **Portfolio Delta Calculation**: Computes aggregate delta from all option positions
+  - Calls: Black-Scholes analytical delta
+  - Puts: Numerical delta via finite difference on binomial tree
+- **Hedging Policy**: Hedge to delta-neutral when `|portfolio_delta| > threshold`
+- **Execution**: Trade underlying shares at mid price (with configurable spread)
+
+Configuration in `HedgerConfig`:
+```python
+HedgerConfig(
+    enabled=True,
+    delta_threshold=10.0,  # Hedge when |delta| > 10
+    hedge_spread=0.0001,   # 1 bps spread on underlying
+)
+```
+
+### Position Limits
+
+The strategy enforces position limits to prevent excessive inventory:
+- `max_position_per_contract`: Maximum position per (strike, option_type)
+- `max_total_position`: Maximum total position across all contracts
+
+When at limit, the strategy stops quoting on the side that would increase exposure.
 
 ## Backtesting (Market Making)
 
@@ -288,6 +322,61 @@ Processed data includes:
 - `r`: Risk-free rate
 - `iv`: Implied volatility
 - `predicted_price`: Predicted price (if prediction was run)
+
+## Assumptions
+
+The following assumptions are made in this implementation:
+
+1. **No transaction costs on options**: Option fills occur at quoted prices without fees
+2. **Underlying hedges at mid price**: Hedge trades execute at mid with small spread (configurable)
+3. **Continuous market**: No market gaps or halts; prices are always available
+4. **IV persistence**: Current IV is a reasonable predictor of next-timestamp fair value
+5. **No dividends**: American calls are priced using Black-Scholes (no early exercise benefit)
+6. **Single expiry**: All options share the same expiration date
+7. **Probabilistic fills**: Non-crossing orders fill probabilistically based on aggressiveness
+
+## Model Limitations
+
+1. **American put pricing**: Uses binomial tree approximation (100 steps default)
+2. **Greeks computation**: Numerical delta for puts adds computational overhead
+3. **No smile dynamics**: IV is computed independently per contract, no arbitrage-free interpolation
+4. **Fill model simplification**: Real market microstructure is more complex
+5. **No latency modeling**: Assumes instantaneous quote updates and fills
+6. **Risk-free rate estimation**: Box spread method may be noisy for illiquid strikes
+
+## Areas for Improvement
+
+For a production trading system, the following areas would need enhancement:
+
+### High Priority
+- **Transaction cost modeling**: Include realistic bid-ask spreads, commissions, and market impact
+- **Greeks computation speed**: Pre-compute or cache Greeks, use analytical approximations
+- **IV surface interpolation**: Use arbitrage-free methods (SVI, SABR) for consistent pricing
+
+### Medium Priority
+- **Multi-expiry support**: Quote across multiple expiries with cross-expiry hedging
+- **Vega hedging**: Use options at different strikes to neutralize vega exposure
+- **Real-time latency**: Model quote-to-fill delays and quote staleness
+
+### Lower Priority
+- **Dividend handling**: Support discrete dividends for accurate American option pricing
+- **Jump risk**: Model gap risk and extreme moves
+- **Regulatory constraints**: Position limits, margin requirements, reporting
+
+## Vol-Fit Analysis
+
+Run the vol-fit analysis to evaluate prediction quality:
+
+```python
+from scripts.analyze_vol_fit import main
+main()
+```
+
+This produces:
+- Overall prediction error statistics
+- Prediction errors by moneyness bucket
+- Prediction errors by option type (call vs put)
+- IV stability analysis over time
 
 ## Contributing
 
